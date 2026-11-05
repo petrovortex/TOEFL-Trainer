@@ -1,0 +1,11 @@
+# Local dependencies and generated frontend
+node_modules/
+dist/
+# Downloaded runtime, local speech tools, and temporary setup files
+.work/
+# Local practice data and credentials
+*.sqlite*
+*.wav
+*.zip
+.env*
+
