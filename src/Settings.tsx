@@ -2,6 +2,14 @@ import { useEffect, useState } from 'react'
 import { api, type Prefs } from './api.ts'
 import { microphone, stopStream } from './audio.ts'
 export function Settings() {
+  const [bank, setBank] = useState<{
+    enabled: boolean
+    state: string
+    pending: number
+    batches: number
+    requests: number
+    error?: string
+  }>()
   const [prefs, setPrefs] = useState<Prefs>(),
     [provider, setProvider] = useState('chatgpt'),
     [model, setModel] = useState(''),
@@ -19,6 +27,23 @@ export function Settings() {
     api<Prefs>('prefs')
       .then(apply)
       .catch((e) => setNote(e.message))
+  }, [])
+  useEffect(() => {
+    let live = true
+    const check = () =>
+      api<NonNullable<typeof bank>>('bank')
+        .then((v) => {
+          if (live) setBank(v)
+        })
+        .catch((e) => {
+          if (live) setNote(e.message)
+        })
+    void check()
+    const timer = setInterval(check, 5000)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
   }, [])
   async function run(fn: () => Promise<string>) {
     setBusy(true)
@@ -168,6 +193,40 @@ export function Settings() {
               </a>
             )}
           {(busy || note) && <p role="status">{busy ? 'Connecting…' : note}</p>}
+        </section>
+        <section className="panel">
+          <h2>Fresh practice material</h2>
+          <label className="toggleLabel">
+            <input
+              type="checkbox"
+              checked={bank?.enabled ?? true}
+              disabled={!bank || busy}
+              onChange={(e) => {
+                const enabled = e.target.checked
+                void run(async () => {
+                  setBank(
+                    await api<NonNullable<typeof bank>>('bank', { enabled }),
+                  )
+                  return enabled
+                    ? 'Automatic replenishment on.'
+                    : 'Automatic replenishment off.'
+                })
+              }}
+            />{' '}
+            Add material automatically
+          </label>
+          <p>
+            The trainer adds checked exercises when unfamiliar material runs
+            low. Up to four batches and eight generation/review requests per 24
+            hours, using your connected AI account. Pauses during tests.
+          </p>
+          {bank && (
+            <small role="status">
+              {bank.state} · {bank.batches}/4 batches · {bank.requests}/8
+              requests{bank.pending > 0 && ` · ${bank.pending} queued`}
+            </small>
+          )}
+          {bank?.error && <p>{bank.error}</p>}
         </section>
         <section className="panel">
           <h2>Microphone and sound</h2>

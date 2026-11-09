@@ -74,7 +74,7 @@ export function wavInfo(b: Buffer) {
   throw Error('Expected mono 16-bit PCM audio.')
 }
 const jobs = new Map<string, Promise<void>>()
-export async function synth(q: Item, cache: string) {
+export async function synth(q: Item, cache: string, checkpoint?: () => void) {
   const key = audioKey(q),
     path = join(cache, key + '.wav')
   if (existsSync(path)) return
@@ -94,6 +94,7 @@ export async function synth(q: Item, cache: string) {
         .digest('hex')
       const single = join(cache, hash + '.wav')
       if (!existsSync(single)) {
+        checkpoint?.()
         const tmp = single + '.' + randomUUID() + '.wav'
         await run(
           tts,

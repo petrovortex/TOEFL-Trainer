@@ -21,6 +21,13 @@ import { writing } from './writing.ts'
 import { speaking } from './speaking.ts'
 import { advanced } from './advanced.ts'
 import { estimateBands } from './bands.ts'
+import {
+  lastUsed,
+  materialKeys,
+  practiceSets,
+  practiceSize,
+} from './material.ts'
+import type { PracticeLength } from './types.ts'
 export const bank: Item[] = [
   ...reading,
   ...advanced,
@@ -64,6 +71,11 @@ function markMissingWriting(q: Item, a: Answer) {
 export function mark(q: Item, a: Answer) {
   if (!q.keys) {
     markMissingWriting(q, a)
+    if (a.score === undefined && !a.clip && !a.text?.trim()) {
+      a.score = 0
+      a.reviewed = true
+      a.note = 'No response submitted.'
+    }
     return
   }
   const parts =
@@ -86,6 +98,7 @@ export function buildStages(
   seed: number,
   history = emptyTrend(),
   extra: Item[] = [],
+  length: PracticeLength = 'standard',
 ): Stage[] {
   const rng = random(seed),
     trend = mode === 'full' ? emptyTrend() : history
@@ -99,11 +112,15 @@ export function buildStages(
       ),
       rng,
     )
-    const rank = (q: Item) =>
-      (level === 0 ? 0 : Math.abs(q.level - level)) +
-      (trend.seen.includes(q.id) ? 4 : 0) +
-      (trend.due?.[q.id] ?? 0)
-    candidates.sort((a, b) => rank(a) - rank(b))
+    const exposure = (q: Item) =>
+      lastUsed(q.group ? pool.filter((x) => x.group === q.group) : [q], trend)
+    candidates.sort(
+      (a, b) =>
+        exposure(a) - exposure(b) ||
+        (level === 0
+          ? 0
+          : Math.abs(a.level - level) - Math.abs(b.level - level)),
+    )
     const picks: Item[] = []
     for (const q of candidates) {
       if (picks.length >= count) break
@@ -132,17 +149,31 @@ export function buildStages(
   if (mode === 'drill') {
     const task = focus as Task
     if (!catalog[task]) throw Error('Unknown exercise.')
-    const items = pick(
-      task,
-      task === 'repeat'
-        ? 3
-        : task === 'interview'
-          ? 2
-          : task === 'email' || task === 'discussion' || task === 'words'
-            ? 1
-            : 3,
-      trend.level,
+    const count = practiceSize(task, length)
+    const sets = shuffle(practiceSets(pool, task), rng)
+    sets.sort(
+      (a, b) =>
+        lastUsed(a, trend) - lastUsed(b, trend) ||
+        Math.abs(a[0].level - trend.level) - Math.abs(b[0].level - trend.level),
     )
+    const chosen: Item[][] = [],
+      stimuli = new Set<string>()
+    for (const set of sets) {
+      if (chosen.length === count) break
+      const keys = set.flatMap(materialKeys)
+      if (keys.some((key) => stimuli.has(key))) continue
+      chosen.push(set)
+      keys.forEach((key) => stimuli.add(key))
+    }
+    if (chosen.length < count)
+      throw Error(
+        'Not enough different material for this length. Choose a shorter session while the bank grows.',
+      )
+    const items = chosen.flat().map((q) => ({
+      ...q,
+      options: q.options ? shuffle(q.options, rng) : undefined,
+      chunks: q.chunks ? shuffle(q.chunks, rng) : undefined,
+    }))
     return [
       {
         name: 'Focused practice',
@@ -302,10 +333,20 @@ export function updateBands(a: Attempt) {
 export function reconcileWriting(a: Attempt) {
   if (!a.ended) return false
   let changed = false
-  for (const stage of a.stages.filter((s) => s.section === 'Writing')) {
+  for (const stage of a.stages) {
     for (const q of stage.items) {
       const answer = a.answers[q.id] ?? {}
       if (markMissingWriting(q, answer)) {
+        a.answers[q.id] = answer
+        changed = true
+      }
+      if (
+        answer.score === undefined &&
+        !q.keys &&
+        !answer.clip &&
+        !answer.text?.trim()
+      ) {
+        mark(q, answer)
         a.answers[q.id] = answer
         changed = true
       }
@@ -318,11 +359,17 @@ export function learnerTrend(attempts: Attempt[], focus: string): Trend {
   const trend = emptyTrend(),
     totals = new Map<Task, number[]>()
   trend.due = {}
+  trend.lastUsed = {}
   for (const a of attempts) {
     for (const q of a.stages.flatMap((s) => s.items)) {
       const answer = a.answers[q.id]
       if (!answer) continue
       trend.seen.push(q.id)
+      for (const key of materialKeys(q))
+        trend.lastUsed[key] = Math.max(
+          trend.lastUsed[key] ?? 0,
+          a.ended ?? a.started,
+        )
       if (
         trend.due[q.id] === undefined &&
         answer.score !== undefined &&

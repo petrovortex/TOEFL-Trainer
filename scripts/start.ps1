@@ -4,6 +4,11 @@ $root = Split-Path $PSScriptRoot -Parent
 Set-Location -LiteralPath $root
 . (Join-Path $PSScriptRoot 'build-directory.ps1')
 try {
+  foreach ($tool in @('curl.exe', 'tar.exe')) {
+    if (!(Get-Command $tool -ErrorAction SilentlyContinue)) {
+      throw "Windows tool $tool is missing. Install Windows updates or restore this built-in tool, then open the launcher again. Node.js and Python do not need to be installed."
+    }
+  }
   if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -and $env:PROCESSOR_ARCHITEW6432 -ne 'AMD64') {
     throw 'TOEFL Trainer needs an Intel or AMD 64-bit Windows computer.'
   }

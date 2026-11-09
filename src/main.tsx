@@ -14,6 +14,7 @@ import { Exam } from './Exam.tsx'
 import { Settings } from './Settings.tsx'
 import { Notebook } from './Notebook.tsx'
 import { Review } from './Review.tsx'
+import { PracticeLength } from './PracticeLength.tsx'
 import './style.css'
 const icons: Record<Section, string> = {
   Reading: 'Aa',
@@ -22,6 +23,7 @@ const icons: Record<Section, string> = {
   Speaking: '◉',
 }
 const route = () => location.hash.slice(1) || 'desk'
+const activityClient = crypto.randomUUID()
 function App() {
   const [page, setPage] = useState(route),
     [rows, setRows] = useState<HistoryRow[]>([]),
@@ -30,6 +32,20 @@ function App() {
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [filter, setFilter] = useState('All')
+  const [drillTask, setDrillTask] = useState<Task>()
+  const liveExam = page.startsWith('attempt/') && !!session && isLive(session)
+  useEffect(() => {
+    void api('activity', { active: liveExam, client: activityClient }).catch(
+      () => {},
+    )
+    if (!liveExam) return
+    const timer = setInterval(() => {
+      void api('activity', { active: true, client: activityClient }).catch(
+        () => {},
+      )
+    }, 15000)
+    return () => clearInterval(timer)
+  }, [liveExam])
   useEffect(() => {
     const f = () => {
       setPage(route())
@@ -60,9 +76,14 @@ function App() {
     mode: Mode,
     focus: string,
     retry?: { id: string; item: string },
-    options?: { followUp?: string },
+    options?: { followUp?: string; planId?: string },
   ) {
     if (busy) return
+    if (mode === 'drill' && !retry && !options?.followUp && !options?.planId) {
+      setDrillTask(focus as Task)
+      return
+    }
+    setDrillTask(undefined)
     setBusy(true)
     setError('')
     try {
@@ -145,6 +166,15 @@ function App() {
         </div>
       </header>
       <main>
+        {drillTask && (
+          <PracticeLength
+            task={drillTask}
+            close={() => setDrillTask(undefined)}
+            start={(planId) =>
+              void start('drill', drillTask, undefined, { planId })
+            }
+          />
+        )}
         {error && (
           <div className="alert" role="alert">
             {error}

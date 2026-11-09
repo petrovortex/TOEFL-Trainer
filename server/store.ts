@@ -4,6 +4,7 @@ import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
 import type { Attempt, HistoryRow, Item } from '../core/types.ts'
 import { reconcileWriting } from '../core/exam.ts'
+import { materialKeys } from '../core/material.ts'
 const localAppData = process.env.LOCALAPPDATA ?? homedir()
 const oldHome = join(localAppData, 'Fieldwork Trainer')
 const newHome = join(localAppData, 'TOEFL Trainer')
@@ -31,7 +32,7 @@ export function transaction(action: () => void) {
 }
 db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000')
 const version = Number(db.prepare('PRAGMA user_version').get()?.user_version)
-if (version > 1)
+if (version > 2)
   throw Error('This database needs a newer version of TOEFL Trainer.')
 if (!version)
   db.exec(`BEGIN;
@@ -40,6 +41,76 @@ if (!version)
  CREATE TABLE generated(id TEXT PRIMARY KEY, fingerprint TEXT UNIQUE, item TEXT NOT NULL);
  CREATE TABLE settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
  PRAGMA user_version=1; COMMIT;`)
+if (version < 2)
+  transaction(() => {
+    db.exec(`CREATE TABLE exposure(key TEXT PRIMARY KEY, task TEXT NOT NULL, used INTEGER NOT NULL);
+    CREATE TABLE bank_jobs(id TEXT PRIMARY KEY, state TEXT NOT NULL, snapshot TEXT NOT NULL);
+    CREATE TABLE bank_usage(time INTEGER NOT NULL, kind TEXT NOT NULL);
+    CREATE INDEX bank_usage_time ON bank_usage(time);`)
+    for (const row of db.prepare('SELECT snapshot FROM attempts').all())
+      recordExposure(JSON.parse(String(row.snapshot)))
+    db.exec('PRAGMA user_version=2')
+  })
+function recordExposure(a: Attempt) {
+  const insert = db.prepare(
+    'INSERT INTO exposure VALUES(?,?,?) ON CONFLICT(key) DO UPDATE SET used=MAX(used,excluded.used)',
+  )
+  for (const [s, stage] of a.stages.entries())
+    for (const [i, q] of stage.items.entries()) {
+      if (
+        !a.ended &&
+        !a.answers[q.id] &&
+        !(a.itemStarted && s === a.stage && i <= a.index)
+      )
+        continue
+      for (const key of materialKeys(q))
+        insert.run(key, q.task, a.ended ?? a.started)
+    }
+}
+export function exposures() {
+  return Object.fromEntries(
+    db
+      .prepare('SELECT key,used FROM exposure')
+      .all()
+      .map((r) => [String(r.key), Number(r.used)]),
+  )
+}
+export function practicedTasks(since: number) {
+  return db
+    .prepare(
+      'SELECT task,MAX(used) AS used FROM exposure WHERE used>=? GROUP BY task ORDER BY used DESC',
+    )
+    .all(since)
+    .map((r) => String(r.task))
+}
+export function jobs<T>(): T[] {
+  return db
+    .prepare('SELECT snapshot FROM bank_jobs ORDER BY rowid')
+    .all()
+    .map((r) => JSON.parse(String(r.snapshot)))
+}
+export function saveJob(job: { id: string; state: string }) {
+  db.prepare('INSERT OR REPLACE INTO bank_jobs VALUES(?,?,?)').run(
+    job.id,
+    job.state,
+    JSON.stringify(job),
+  )
+}
+export function bankUsage(now = Date.now()) {
+  const rows = db
+    .prepare(
+      'SELECT kind,COUNT(*) AS count FROM bank_usage WHERE time>? GROUP BY kind',
+    )
+    .all(now - 86400000)
+  return {
+    batches: Number(rows.find((r) => r.kind === 'batch')?.count ?? 0),
+    requests: Number(rows.find((r) => r.kind === 'request')?.count ?? 0),
+  }
+}
+export function spendBank(kind: 'batch' | 'request', now = Date.now()) {
+  db.prepare('INSERT INTO bank_usage VALUES(?,?)').run(now, kind)
+  db.prepare('DELETE FROM bank_usage WHERE time<=?').run(now - 86400000)
+}
 export function save(a: Attempt) {
   db.prepare(
     'INSERT INTO attempts VALUES(?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET ended=excluded.ended,bands=excluded.bands,snapshot=excluded.snapshot',
@@ -52,6 +123,7 @@ export function save(a: Attempt) {
     JSON.stringify(a.bands),
     JSON.stringify(a),
   )
+  recordExposure(a)
 }
 export function load(id: string): Attempt {
   const row = db.prepare('SELECT snapshot FROM attempts WHERE id=?').get(id)
@@ -89,9 +161,12 @@ export function recent(): Attempt[] {
     .map((r) => JSON.parse(String(r.snapshot)))
 }
 export function previousFullMocks(started: number): Attempt[] {
-  return db.prepare(
-    "SELECT snapshot FROM attempts WHERE mode='full' AND ended IS NOT NULL AND started < ? ORDER BY started DESC LIMIT 3"
-  ).all(started).map((row) => JSON.parse(String(row.snapshot)))
+  return db
+    .prepare(
+      "SELECT snapshot FROM attempts WHERE mode='full' AND ended IS NOT NULL AND started < ? ORDER BY started DESC LIMIT 3",
+    )
+    .all(started)
+    .map((row) => JSON.parse(String(row.snapshot)))
 }
 export function setting(k: string) {
   return String(
@@ -106,6 +181,17 @@ export function extras(): Item[] {
     .prepare('SELECT item FROM generated')
     .all()
     .map((r) => JSON.parse(String(r.item)))
+}
+export function archivedGeneratedMaterial(): Item[] {
+  return db
+    .prepare("SELECT snapshot FROM attempts WHERE mode='full'")
+    .all()
+    .flatMap((row) => {
+      const a: Attempt = JSON.parse(String(row.snapshot))
+      return a.stages
+        .flatMap((s) => [...s.items, ...(s.upper ?? [])])
+        .filter((q) => q.id.startsWith('gen-') && !q.personal)
+    })
 }
 export function addItem(q: Item, hash: string) {
   db.prepare('INSERT INTO generated VALUES(?,?,?)').run(

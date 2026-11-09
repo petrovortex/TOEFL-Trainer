@@ -818,5 +818,358 @@ footer {
 .columns > * {
   min-width: 0;
 }
-.scoreTable td, .scoreTable thead th:last-child { text-align: right; }
-.scoreTable .overallLegacy { display: inline-block; margin-left: 1em; font-weight: 500; color: var(--muted); }
+.scoreTable td,
+.scoreTable thead th:last-child {
+  text-align: right;
+}
+.scoreTable .overallLegacy {
+  display: inline-block;
+  margin-left: 1em;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+/* Results: keep the report visible while inspecting one response. */
+[hidden] {
+  display: none !important;
+}
+.reviewHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 30px 0 24px;
+}
+.reviewHeading h1 {
+  font:
+    normal 38px/1.15 Georgia,
+    serif;
+  margin: 6px 0;
+  color: var(--ink);
+}
+.reviewHeading p {
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+.reviewActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.compactScores {
+  max-width: 680px;
+  margin-bottom: 26px;
+}
+.compactScores .scoreTable th,
+.compactScores .scoreTable td {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+.reviewFilters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.reviewFilters .tabs,
+.reviewTabs {
+  margin: 0;
+  flex-wrap: wrap;
+}
+.filterChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.filterChips button {
+  font-size: 13px;
+  padding: 6px 10px;
+}
+.filterChips button.on {
+  background: #e3eadf;
+  border-color: var(--green);
+}
+.reviewWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.responseTableWrap {
+  overflow: auto;
+  max-height: 78vh;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.responseTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.responseTable thead {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #eaf0e5;
+  color: var(--muted);
+}
+.responseTable th,
+.responseTable td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.responseTable tbody tr:not(.groupRow) {
+  cursor: pointer;
+}
+.responseTable tbody tr:hover {
+  background: #f1f4e9;
+}
+.responseTable .selectedResponse {
+  background: #e6eddf;
+  box-shadow: inset 3px 0 var(--green);
+}
+.responseTable th button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 2px;
+  font-weight: 400;
+}
+.responseTable th button span {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.responseTable .groupRow th {
+  background: #f0f2e9;
+  font-weight: 600;
+  font-size: 12px;
+  padding-top: 14px;
+}
+.responsePoints {
+  white-space: nowrap;
+  font-weight: 600;
+}
+.responseStatus {
+  color: #705d3b;
+  font-size: 12px;
+}
+.responseStatus.correct {
+  color: var(--green);
+}
+.responseDetail {
+  position: sticky;
+  top: 16px;
+  max-height: 78vh;
+  overflow: auto;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.detailNav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  position: sticky;
+  top: 0;
+  background: var(--paper);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+  z-index: 1;
+}
+.detailNav button {
+  padding: 5px 10px;
+  font-size: 13px;
+}
+.detailBody {
+  padding: 20px;
+  overflow-wrap: anywhere;
+}
+.detailBody h2 {
+  font:
+    normal 27px/1.2 Georgia,
+    serif;
+  margin: 12px 0;
+}
+.detailBody h3 {
+  font-size: 15px;
+  margin: 22px 0 8px;
+}
+.detailBody audio {
+  width: 100%;
+  display: block;
+  margin: 10px 0;
+}
+.detailBody .row {
+  margin-top: 12px;
+}
+.detailBody details {
+  margin: 14px 0;
+}
+.detailBody summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.detailBody .excerpt {
+  white-space: pre-wrap;
+}
+.backToReport {
+  display: none;
+}
+.trainerWorkspace {
+  max-width: 760px;
+  padding: 24px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-top: 20px;
+}
+.trainerContext {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.trainerContext h2 {
+  margin: 0;
+}
+.trainerContext span {
+  color: var(--muted);
+}
+.trainerWorkspace .chatLog {
+  max-height: none;
+}
+.trainerWorkspace .chatLog p {
+  white-space: pre-wrap;
+}
+.trainerWorkspace form {
+  margin-top: 20px;
+  display: grid;
+  gap: 12px;
+}
+.trainerWorkspace form button {
+  justify-self: end;
+}
+.textLink {
+  display: inline;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-decoration: underline;
+  font: inherit;
+  color: var(--green);
+}
+.practiceDialog {
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  color: var(--ink);
+}
+.practiceDialog::backdrop {
+  background: #13251b66;
+}
+.practiceDialog h2 {
+  font:
+    normal 30px/1.2 Georgia,
+    serif;
+  margin-top: 0;
+}
+.practiceDialog .row {
+  margin-top: 22px;
+  justify-content: flex-end;
+}
+.toggleLabel {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+}
+.toggleLabel input {
+  width: auto;
+}
+@media (max-width: 900px) {
+  .reviewHeading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .reviewActions {
+    justify-content: flex-start;
+  }
+  .reviewWorkspace {
+    grid-template-columns: 1fr;
+  }
+  .reviewWorkspace .responseDetail {
+    display: none;
+  }
+  .reviewWorkspace.showingDetails .responseTableWrap {
+    display: none;
+  }
+  .reviewWorkspace.showingDetails .responseDetail {
+    display: block;
+    position: static;
+    max-height: none;
+  }
+  .backToReport {
+    display: block;
+    margin: 12px 16px 0;
+  }
+  .responseTableWrap {
+    max-height: none;
+  }
+  .responseTable {
+    font-size: 12px;
+  }
+  .responseTable th,
+  .responseTable td {
+    padding: 8px 5px;
+  }
+  .detailNav {
+    position: static;
+  }
+  .trainerWorkspace {
+    padding: 18px;
+  }
+}
+.tabs button.on:hover:not(:disabled) {
+  background: var(--green);
+  color: white;
+}
+.gapAnswers {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin: 12px 0;
+}
+.gapAnswers th,
+.gapAnswers td {
+  text-align: left;
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+}
+.gapCorrect {
+  background: #deead9;
+  color: var(--ink);
+}
+.gapMissed {
+  background: #f2e5ca;
+  color: #664c23;
+}
+.detailBody mark {
+  padding: 0 2px;
+  border-radius: 2px;
+}
+.detailBody sup {
+  font-size: 9px;
+  padding-left: 2px;
+}

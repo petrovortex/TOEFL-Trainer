@@ -3,17 +3,12 @@ import test from 'node:test'
 import { mkdtempSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { setTimeout as delay } from 'node:timers/promises'
 import { randomUUID } from 'node:crypto'
 import { estimateBands, displayBand, legacyEstimates } from '../core/bands.ts'
 import { buildStages, mark, reconcileWriting, RULES } from '../core/exam.ts'
 import type { Attempt, Item } from '../core/types.ts'
 process.env.FIELDWORK_DATA = mkdtempSync(join(tmpdir(), 'fieldwork-release11-'))
-const { prepareMock, mockStatus, readyMock, completePrepared, needsFreshMock } =
-  await import('../server/mock.ts')
 const { save, load, extras } = await import('../server/store.ts')
-const { planFollowUp } = await import('../server/followup.ts')
-const { setProvider } = await import('../server/provider.ts')
 function full(): Attempt {
   const a: Attempt = {
     id: randomUUID(),
@@ -121,96 +116,6 @@ test('legacy full snapshots display ranges; perfect mocks alone earn a single ov
   a.mode = 'drill'
   assert.deepEqual(estimateBands(a), {})
 })
-test('mock preparation checkpoints sets, resumes both branches, and consumes only a complete form', async () => {
-  let calls = 0
-  const writer = async (slots: Item[]) =>
-    slots.map((q) => ({ ...q, id: randomUUID(), title: 'fresh ' + q.title }))
-  prepareMock(async (slots) => {
-    if (++calls === 3) throw Error('fixture quota')
-    return writer(slots)
-  })
-  while (mockStatus().state === 'preparing') await delay(5)
-  assert.equal(mockStatus().done, 2)
-  assert.equal(mockStatus().state, 'paused')
-  assert.throws(readyMock, /Finish/)
-  prepareMock(writer)
-  while (mockStatus().state === 'preparing') await delay(5)
-  const d = readyMock()
-  assert.ok(
-    d.stages.every((s) =>
-      [...s.items, ...(s.upper ?? [])].every((q) =>
-        q.title.startsWith('fresh '),
-      ),
-    ),
-  )
-  assert.throws(
-    () =>
-      completePrepared(d.id, () => {
-        throw Error('write failed')
-      }),
-    /write failed/,
-  )
-  assert.equal(mockStatus().state, 'ready')
-  completePrepared(d.id, () => {})
-  assert.equal(mockStatus().state, 'empty')
-})
-test(
-  'follow-up decision uses actual errors and creates one private drill even on concurrent retry',
-  { skip: process.platform !== 'win32' },
-  async (t) => {
-    const a = full()
-    const q = a.stages.find((s) => s.items[0].task === 'email')!.items[0]
-    a.answers[q.id] = {
-      text: 'I forgot to include the request.',
-      note: 'No action requested.',
-      score: 0.4,
-    }
-    save(a)
-    setProvider('openai', 'test-model', 'fixture-key')
-    const outputs = [
-      JSON.stringify({
-        task: 'email',
-        reason: 'Practice making a specific request.',
-        brief: 'Ask for a replacement for a missing locker key.',
-      }),
-      JSON.stringify({
-        title: 'A replacement key',
-        prompt: 'Write to the facilities office about a missing locker key.',
-        passage:
-          'Explain when you lost it. Request a replacement. Ask about the fee.',
-        evidence: 'Include all three points.',
-      }),
-      'PASS',
-    ]
-    let calls = 0
-    t.mock.method(
-      globalThis,
-      'fetch',
-      async (_url: RequestInfo | URL, init?: RequestInit) => {
-        if (calls === 0) assert.match(String(init?.body), /No action requested/)
-        const delta = outputs[calls++]
-        assert.ok(delta)
-        return new Response(
-          'data: ' +
-            JSON.stringify({ type: 'response.output_text.delta', delta }) +
-            '\n\ndata: {"type":"response.completed"}\n\n',
-        )
-      },
-    )
-    await Promise.all([planFollowUp(a.id), planFollowUp(a.id)])
-    await planFollowUp(a.id)
-    assert.equal(calls, 3)
-    assert.equal(extras().length, 1)
-    assert.equal(extras()[0].id, load(a.id).followUp?.item)
-    assert.ok(extras()[0].personal)
-  },
-)
-test('a perfect mock does not consume a generation request', async () => {
-  const a = full()
-  save(a)
-  assert.equal((await planFollowUp(a.id)).followUp?.item, undefined)
-})
-
 test('previous-scale estimates use section-specific ETS rows and sum only four available sections', () => {
   const bands = estimateBands(full())
   assert.deepEqual(legacyEstimates(bands), {
@@ -230,18 +135,6 @@ test('previous-scale estimates use section-specific ETS rows and sum only four a
   })
 })
 
-test('the trainer refreshes a full form for repeated material independently of learner grades', () => {
-  const past = full(),
-    current = full()
-  current.started = past.started + 10
-  assert.equal(needsFreshMock(current, [current]), false)
-  assert.equal(needsFreshMock(current, [past]), true)
-  past.answers = {}
-  assert.equal(needsFreshMock(current, [past]), true)
-  past.mode = 'drill'
-  assert.equal(needsFreshMock(current, [past]), false)
-})
-
 test('whole-attempt assessment preserves saved grades and leaves coaching to the learner', async () => {
   const { assessAttempt } = await import('../server/assess.ts')
   const a = full()
@@ -252,39 +145,5 @@ test('whole-attempt assessment preserves saved grades and leaves coaching to the
   ])
   assert.deepEqual(first.answers, a.answers)
   assert.deepEqual(second.messages, [])
-  assert.ok(first.followUp)
+  assert.equal(first.followUp, undefined)
 })
-
-test(
-  'assessment starts one independent mock for repeated material and resumes its saved draft',
-  { skip: process.platform !== 'win32' },
-  async (t) => {
-    const { assessAttempt } = await import('../server/assess.ts')
-    const past = full(),
-      a = full()
-    a.started = 20
-    a.ended = 21
-    save(past)
-    save(a)
-    setProvider('openai', 'test-model', 'fixture-key')
-    let calls = 0
-    t.mock.method(globalThis, 'fetch', async () => {
-      calls++
-      return new Response('quota', { status: 429 })
-    })
-    const [first, same] = await Promise.all([
-      assessAttempt(a.id),
-      assessAttempt(a.id),
-    ])
-    while (mockStatus().state === 'preparing') await delay(5)
-    assert.ok(first.mockPreparationId)
-    assert.equal(first.mockPreparationId, same.mockPreparationId)
-    assert.equal(mockStatus().state, 'paused')
-    assert.equal(calls, 1)
-    await assessAttempt(a.id)
-    while (mockStatus().state === 'preparing') await delay(5)
-    assert.equal(load(a.id).mockPreparationId, first.mockPreparationId)
-    assert.equal(calls, 2)
-    assert.deepEqual(load(a.id).messages, [])
-  },
-)

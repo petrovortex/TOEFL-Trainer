@@ -25,7 +25,7 @@ import {
   RULES,
 } from '../core/exam.ts'
 import { catalog, current, secondsLimit, emptyTrend } from '../core/types.ts'
-import type { Attempt, Mode, Item } from '../core/types.ts'
+import type { Attempt, Mode, Item, Task } from '../core/types.ts'
 import {
   history,
   responseHistory,
@@ -35,6 +35,7 @@ import {
   extras,
   clips,
   cache,
+  exposures,
 } from './store.ts'
 import { audioKey, synth, wavInfo, wave } from './speech.ts'
 import {
@@ -45,8 +46,17 @@ import {
   disconnect,
   verify,
 } from './provider.ts'
-import { chat, localTranscript } from './coach.ts'
-import { mockStatus, readyMock, completePrepared } from './mock.ts'
+import { localTranscript } from './coach.ts'
+import { chat } from './analysis.ts'
+import {
+  bankStatus,
+  setBankEnabled,
+  replenish,
+  runBank,
+  migratePreparedMaterial,
+} from './bank.ts'
+import { examActivity, foregroundWork } from './work.ts'
+import { practicePlan, consumePlan } from './practice.ts'
 import { assessAttempt } from './assess.ts'
 
 const port = Number(process.env.FIELDWORK_PORT ?? 43127),
@@ -91,7 +101,8 @@ function audioPath(key: string) {
   return existsSync(cached) ? cached : join(cache, key + '.wav')
 }
 async function prepare(q: Item) {
-  if (q.speech && !existsSync(audioPath(audioKey(q)))) await synth(q, cache)
+  if (q.speech && !existsSync(audioPath(audioKey(q))))
+    await foregroundWork(() => synth(q, cache))
 }
 type Live = Attempt & {
   played?: string[]
@@ -196,7 +207,7 @@ const server = createServer(async (req, res) => {
           ),
         )
       if (path === '/api/prefs') return out(preferences())
-      if (path === '/api/mock') return out(mockStatus())
+      if (path === '/api/bank') return out(bankStatus())
       if (path === '/api/status')
         return out({
           app: 'TOEFL Trainer',
@@ -276,26 +287,50 @@ const server = createServer(async (req, res) => {
       return out(view(a))
     }
     const b = JSON.parse((await body(req)).toString() || '{}')
+    if (path === '/api/practice-plan')
+      return out(practicePlan(b.task, b.length))
+    if (path === '/api/activity') {
+      examActivity(!!b.active, String(b.client ?? 'browser').slice(0, 100))
+      return out({ ok: true })
+    }
+    if (path === '/api/bank') {
+      setBankEnabled(!!b.enabled)
+      replenish()
+      return out(bankStatus())
+    }
     if (path === '/api/start') {
       const mode: Mode = b.mode
       if (!['full', 'section', 'drill'].includes(mode))
         throw Error('Unknown mode.')
       const focus = mode === 'full' ? 'Full mock' : String(b.focus)
-      const prepared =
-        mode === 'full' && mockStatus().state === 'ready'
-          ? readyMock()
-          : undefined
-      const seed = prepared?.seed ?? randomBytes(4).readUInt32LE(),
-        trend = mode === 'full' ? emptyTrend() : learnerTrend(recent(), focus)
+      const planned =
+        mode === 'drill' && b.planId ? consumePlan(b.planId, focus) : undefined
+      const seed = planned?.seed ?? randomBytes(4).readUInt32LE(),
+        trend =
+          mode === 'full'
+            ? emptyTrend()
+            : { ...learnerTrend(recent(), focus), lastUsed: exposures() }
       const stages =
-        prepared?.stages ?? buildStages(mode, focus, seed, trend, extras())
+        planned?.stages ??
+        (mode === 'drill' && (b.retry || b.followUp)
+          ? [
+              {
+                section: catalog[focus as Task]?.[0],
+                name: 'Focused practice',
+                minutes: 0,
+                items: [] as Item[],
+              },
+            ]
+          : buildStages(mode, focus, seed, trend, extras(), b.length))
       if (mode === 'drill' && b.followUp) {
         const f = load(b.followUp).followUp
         const item = f?.item
           ? extras().find((q) => q.id === f.item && q.task === focus)
           : undefined
         if (!item) throw Error('Follow-up exercise is unavailable.')
-        stages[0].items = [item]
+        stages[0].items = item.group
+          ? extras().filter((q) => q.group === item.group)
+          : [item]
         stages[0].name = 'Trainer follow-up'
       }
       let retryOf: Attempt['retryOf']
@@ -310,8 +345,11 @@ const server = createServer(async (req, res) => {
         stages[0].name = 'Guided retry'
         retryOf = { id: original.id, item: item.id }
       }
-      for (const s of stages)
-        for (const q of [...s.items, ...(s.upper ?? [])]) await prepare(q)
+      examActivity()
+      await foregroundWork(async () => {
+        for (const s of stages)
+          for (const q of [...s.items, ...(s.upper ?? [])]) await prepare(q)
+      })
       const a: Live = {
         id: randomUUID(),
         mode,
@@ -329,8 +367,9 @@ const server = createServer(async (req, res) => {
         messages: [],
       }
       a.retryOf = retryOf
-      if (prepared) completePrepared(prepared.id, () => save(a))
-      else save(a)
+      if (mode === 'drill')
+        a.practiceLength = planned?.length ?? b.length ?? 'standard'
+      save(a)
       return out(view(a))
     }
     if (path === '/api/connect') return out({ url: authorize(origin) })
@@ -342,11 +381,18 @@ const server = createServer(async (req, res) => {
       setProvider(b.provider, String(b.model ?? ''), b.key)
       return out(preferences())
     }
-    if (path === '/api/verify') return out(await verify())
+    if (path === '/api/verify') return out(await foregroundWork(verify))
     if (path === '/api/assess') return out(await assessAttempt(b.id))
     if (path === '/api/transcript')
-      return out(await localTranscript(b.id, b.item))
-    if (path === '/api/chat') return out(await chat(b.id, b.message, b.item))
+      return out(await foregroundWork(() => localTranscript(b.id, b.item)))
+    if (path === '/api/chat')
+      return out(
+        await chat(b.id, b.message, {
+          scope: b.scope,
+          item: b.item,
+          action: b.action,
+        }),
+      )
     const a = active(b.id),
       q = current(a)
     if (a.ended || q.id !== b.item) return out(view(a))
@@ -401,6 +447,10 @@ const server = createServer(async (req, res) => {
         return
     }
     save(a)
+    if (a.ended) {
+      examActivity(false)
+      replenish()
+    }
     out(view(a))
   } catch (e) {
     if (!res.headersSent) {
@@ -440,6 +490,18 @@ server.on('error', async (e: NodeJS.ErrnoException) => {
   process.exitCode = 1
 })
 server.listen(port, '127.0.0.1', () => {
+  examActivity() // Give a restored browser time to report whether an exam is active.
+  migratePreparedMaterial()
+  const tick = () => {
+    try {
+      replenish()
+      void runBank().catch((e) => console.error('Bank:', e.message))
+    } catch (e) {
+      console.error('Bank:', (e as Error).message)
+    }
+  }
+  setInterval(tick, 15000).unref()
+  tick()
   console.log('TOEFL Trainer is ready at ' + origin)
   if (process.argv.includes('--open')) openBrowser()
 })

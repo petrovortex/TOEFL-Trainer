@@ -21,6 +21,14 @@ export const sections: Section[] = [
   'Speaking',
 ]
 export type Mode = 'full' | 'section' | 'drill'
+export type PracticeLength = 'short' | 'standard' | 'long'
+export interface CoachMessage {
+  role: 'user' | 'assistant'
+  text: string
+  scope?: 'attempt' | 'item'
+  item?: string
+  analysis?: string
+}
 export interface Item {
   id: string
   task: Task
@@ -46,6 +54,7 @@ export interface Answer {
   score?: number
   note?: string
   reviewed?: boolean
+  gradingState?: 'insufficient'
 }
 export interface Stage {
   section: Section
@@ -71,7 +80,10 @@ export interface Attempt {
   ended?: number
   stages: Stage[]
   answers: Record<string, Answer>
-  messages: { role: 'user' | 'assistant'; text: string }[]
+  messages: CoachMessage[]
+  analysis?: { fingerprint: string; text: string }
+  analysisParts?: Record<string, string>
+  practiceLength?: PracticeLength
   bands: Partial<Record<Section | 'Overall', number>>
   retryOf?: { id: string; item: string }
 }
@@ -84,6 +96,7 @@ export interface Trend {
   level: number
   weakness: Partial<Record<Task, number>>
   due?: Partial<Record<string, number>>
+  lastUsed?: Record<string, number>
 }
 export const emptyTrend = (): Trend => ({ seen: [], level: 2, weakness: {} })
 export const current = (a: Attempt) => a.stages[a.stage]?.items[a.index]
